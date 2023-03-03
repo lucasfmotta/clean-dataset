@@ -2,6 +2,7 @@
 
 import os
 import sys
+from Bio import SeqIO
 
 def make_dbs(lista_dbs):
     '''
@@ -9,14 +10,6 @@ def make_dbs(lista_dbs):
     '''
     for db in lista_dbs:
         os.system(f'makeblastdb -dbtype nucl -in {db}')
-
-def make_query_fasta(lineas_query):
-    '''
-    genera fasta con la secuencia query
-    '''
-    salida = open('query.fasta', 'w')
-    salida.write(f'>{lineas_query[1:]}')  # cambia @ por >
-    salida.close()
 
 def read_result():
     '''
@@ -55,69 +48,77 @@ def count_seqs(lista_fastqs):
     for fastq in lista_fastqs:
         fastq = open(fastq)
         for line in fastq:
-            if line.find('runid=') != -1:
-                n += 1
+            n += 1
         fastq.close()
-    return n
+    return n/4
 
-def clean_tempfiles():
-    temp_files = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.nhr') or xfile.endswith('nin') or xfile.endswith('nsq')]
+def clean_tempfiles(multiple_tempfiles):
+    if multiple_tempfiles:
+        temp_files = ['temp_files/'+xfile for xfile in os.listdir(os.curdir+'/temp_files') if xfile.endswith('.fastq')]
+        for temp_file in temp_files:
+            os.remove(temp_file)
+        os.rmdir('temp_files')
+    temp_files = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.nhr') or xfile.endswith('.nin') or xfile.endswith('.nsq')]
     for temp_file in temp_files:
         os.remove(temp_file)
 
+def update():
+    '''
+    actualiza el script a su ultima version
+    '''
+    os.system('sudo wget https://raw.githubusercontent.com/lucasfmotta/clean-dataset/main/clean-dataset.py -O /usr/local/bin/clean-dataset')
+    os.system('sudo chmod a+rx /usr/local/bin/clean-dataset')
+    quit()
+
 def show_help():
-    print('clean-dataset.py [BLAST parameters]\n  [optional]')
+    print('clean-dataset.py [BLAST parameters]\n  [optional]\nUpdate: -U')
     quit()
 
 parametros_blast = (' ').join(sys.argv[1:])
 if parametros_blast == '-h' or parametros_blast == '-help':
     show_help()
+if parametros_blast == '-U':
+    update()
 
 lista_dbs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.db')]
 make_dbs(lista_dbs)
 
 lista_fastqs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.fastq')]
 
-ids_secuencias_basura = [] # aca se juntan los ids de todas las secuencias que dieron hit con alguna db
+seqs_nodescartadas = []
+multiple_tempfiles = False
 n_seqs_total = count_seqs(lista_fastqs)
 n_parcial = 0
-for fastq in lista_fastqs:
-    fastq = open(fastq)
-    read_seq = False
-    for line in fastq:
-        if line.find('runid=') != -1:
-            n_parcial += 1
-            lineas_query = line
-            id_query = line[line.find('read=')+5:line.find(' ', line.find('read='))] # Busca el identificador de la secuencia basado en el número de read
-            read_seq = True
-            continue
-        if read_seq:
-            lineas_query += line
-            read_seq = False
-            make_query_fasta(lineas_query)
-            if blast(lista_dbs, parametros_blast): # hubo hit con alguna db, la secuencia es basura
-                ids_secuencias_basura.append(id_query)
-            porcentaje = n_parcial / n_seqs_total * 100
-            print(f'\r{round(porcentaje, 2)}%', end='')
-    fastq.close()
-
-dataset_limpio = open('DATASET.fastq', 'w')
 
 for fastq in lista_fastqs:
-    fastq = open(fastq)
-    for line in fastq:
-        if line.find('runid=') != -1:
-            id_query = line[line.find('read=') + 5 : line.find(' ', line.find('read='))] # Busca el identificador de la secuencia basado en el número de read
-            if id_query in ids_secuencias_basura:
-                write = False
-                ids_secuencias_basura.remove(id_query) # saca el id de la lista asi las proximas busquedas son mas rapidas
-                continue
-            else:
-                write = True
-        if write:
-            dataset_limpio.write(line)
-    fastq.close()
+    for seq in SeqIO.parse(fastq, 'fastq'):
+        n_parcial += 1
+        SeqIO.write(seq, 'query.fasta', 'fasta')
+        if not blast(lista_dbs, parametros_blast): # no hubo hit con alguna db, la secuencia no se descarta
+            seqs_nodescartadas.append(seq)
+        porcentaje = n_parcial / n_seqs_total * 100
+        print(f'\r{round(porcentaje, 1)}%', end='')
 
-dataset_limpio.close()
-clean_tempfiles()
-print('Goodbye')  # solo para que quede lindo el final
+        if len(seqs_nodescartadas) == 4000:
+            if not multiple_tempfiles: #solo con el primer tempfile
+                os.mkdir('temp_files')
+            SeqIO.write(seqs_nodescartadas, f'temp_files/temp{n_parcial}.fastq', 'fastq')
+            seqs_nodescartadas = []
+            multiple_tempfiles = True
+
+os.mkdir('Results')
+if multiple_tempfiles:
+    if len(seqs_nodescartadas) > 0: #por si quedó alguna secuencia colgada
+        SeqIO.write(seqs_nodescartadas, f'temp_files/temp{n_parcial}.fastq', 'fastq')
+    salida = open('Results/DATASET-LIMPIO.fastq', 'w')
+    temp_files = ['temp_files/'+xfile for xfile in os.listdir(os.curdir+'/temp_files') if xfile.endswith('.fastq')]
+    for temp_file in temp_files:
+        temp_file = open(temp_file)
+        for line in temp_file:
+            salida.write(line)
+    salida.close()
+else:
+    SeqIO.write(seqs_nodescartadas, 'Results/DATASET-LIMPIO.fastq', 'fastq')
+
+clean_tempfiles(multiple_tempfiles)
+print('\nGoodbye')  # solo para que quede lindo el final
