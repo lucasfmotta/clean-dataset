@@ -3,6 +3,7 @@
 import os
 import sys
 from Bio import SeqIO
+from tqdm import tqdm
 
 def make_dbs(lista_dbs):
     '''
@@ -52,12 +53,7 @@ def count_seqs(lista_fastqs):
         fastq.close()
     return n/4
 
-def clean_tempfiles(multiple_tempfiles):
-    if multiple_tempfiles:
-        temp_files = ['temp_files/'+xfile for xfile in os.listdir(os.curdir+'/temp_files') if xfile.endswith('.fastq')]
-        for temp_file in temp_files:
-            os.remove(temp_file)
-        os.rmdir('temp_files')
+def clean_tempfiles():
     temp_files = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.nhr') or xfile.endswith('.nin') or xfile.endswith('.nsq')]
     for temp_file in temp_files:
         os.remove(temp_file)
@@ -70,55 +66,46 @@ def update():
     os.system('sudo chmod a+rx /usr/local/bin/clean-dataset')
     quit()
 
+def read_input():
+    if '-h' in sys.argv or '-help' in sys.argv:
+        show_help()
+    if '-U' in sys.argv:
+        update()
+    else:
+        parametros_blast = (' ').join(sys.argv[1:])
+        return parametros_blast
+
 def show_help():
     print('clean-dataset.py [BLAST parameters]\n  [optional]\nUpdate: -U')
     quit()
 
-parametros_blast = (' ').join(sys.argv[1:])
-if parametros_blast == '-h' or parametros_blast == '-help':
-    show_help()
-if parametros_blast == '-U':
-    update()
+parametros_blast = read_input()
 
 lista_dbs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.db')]
 make_dbs(lista_dbs)
-
 lista_fastqs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.fastq')]
 
-seqs_nodescartadas = []
-multiple_tempfiles = False
+if not os.path.isdir('Results'):
+    os.mkdir('Results')
+
+salida_hit = open('Results/HIT.fastq', 'w')
+salida_nohit = open('Results/NO-HIT.fastq', 'w')
+
 n_seqs_total = count_seqs(lista_fastqs)
 n_parcial = 0
 
-for fastq in lista_fastqs:
+for fastq in tqdm(lista_fastqs):
     for seq in SeqIO.parse(fastq, 'fastq'):
         n_parcial += 1
         SeqIO.write(seq, 'query.fasta', 'fasta')
-        if not blast(lista_dbs, parametros_blast): # no hubo hit con alguna db, la secuencia no se descarta
-            seqs_nodescartadas.append(seq)
+        if blast(lista_dbs, parametros_blast): # hubo hit con alguna db -> HIT.fastq
+            salida_hit.write(seq.format('fastq'))
+        else:
+            salida_nohit.write(seq.format('fastq')) # No hubo hit con ninguna db -> NO-HIT.fastq
         porcentaje = n_parcial / n_seqs_total * 100
         print(f'\r{round(porcentaje, 1)}%', end='')
 
-        if len(seqs_nodescartadas) == 4000:
-            if not multiple_tempfiles: #solo con el primer tempfile
-                os.mkdir('temp_files')
-            SeqIO.write(seqs_nodescartadas, f'temp_files/temp{n_parcial}.fastq', 'fastq')
-            seqs_nodescartadas = []
-            multiple_tempfiles = True
-
-os.mkdir('Results')
-if multiple_tempfiles:
-    if len(seqs_nodescartadas) > 0: #por si quedó alguna secuencia colgada
-        SeqIO.write(seqs_nodescartadas, f'temp_files/temp{n_parcial}.fastq', 'fastq')
-    salida = open('Results/DATASET-LIMPIO.fastq', 'w')
-    temp_files = ['temp_files/'+xfile for xfile in os.listdir(os.curdir+'/temp_files') if xfile.endswith('.fastq')]
-    for temp_file in temp_files:
-        temp_file = open(temp_file)
-        for line in temp_file:
-            salida.write(line)
-    salida.close()
-else:
-    SeqIO.write(seqs_nodescartadas, 'Results/DATASET-LIMPIO.fastq', 'fastq')
-
-clean_tempfiles(multiple_tempfiles)
-print('\nGoodbye')  # solo para que quede lindo el final
+salida_hit.close()
+salida_nohit.close()
+clean_tempfiles()
+print('Goodbye')  # solo para que quede lindo el final
