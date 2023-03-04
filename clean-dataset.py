@@ -71,6 +71,9 @@ def read_input():
         show_help()
     if '-U' in sys.argv:
         update()
+    if '-query' in sys.argv or '-db' in sys.argv or '-out' in sys.argv:
+        print('Wrong input. For help use the -h command')
+        quit()
     else:
         parametros_blast = (' ').join(sys.argv[1:])
         return parametros_blast
