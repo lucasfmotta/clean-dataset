@@ -5,12 +5,23 @@ import sys
 from Bio import SeqIO
 from tqdm import tqdm
 
+def get_files():
+    lista_dbs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.db')]
+    lista_fastqs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.fastq')]
+    if not lista_dbs or not lista_fastqs:
+        print('No .db or .fastq files found')
+        quit()
+    make_dbs(lista_dbs)
+    return lista_dbs, lista_fastqs
+
 def make_dbs(lista_dbs):
     '''
     genera las db para blast
     '''
     for db in lista_dbs:
-        os.system(f'makeblastdb -dbtype nucl -in {db}')
+        problema = os.system(f'makeblastdb -dbtype nucl -in {db}')
+        if problema:
+            quit()
 
 def read_result():
     '''
@@ -33,7 +44,9 @@ def blast(lista_dbs, parametros):
     cuando hay hit con una db, corta asi no sigue probando con las otras dbs al pedo
     '''
     for db in lista_dbs:
-        os.system(f'blastn -query query.fasta -db {db} -out query.resultado {parametros}')
+        problema = os.system(f'blastn -query query.fasta -db {db} -out query.resultado {parametros}')
+        if problema:
+            quit()
         if read_result():  # si hubo hit
             os.remove('query.fasta')
             return True
@@ -82,11 +95,9 @@ def show_help():
     print('clean-dataset.py [BLAST parameters]\n  [optional]\nUpdate: -U')
     quit()
 
-parametros_blast = read_input()
 
-lista_dbs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.db')]
-make_dbs(lista_dbs)
-lista_fastqs = [xfile for xfile in os.listdir(os.curdir) if xfile.endswith('.fastq')]
+parametros_blast = read_input()
+lista_dbs, lista_fastqs = get_files()
 
 if not os.path.isdir('Results'):
     os.mkdir('Results')
